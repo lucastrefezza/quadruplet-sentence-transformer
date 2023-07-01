@@ -1,0 +1,1 @@
+from models.losses.losses import GammaQuadrupletLoss
