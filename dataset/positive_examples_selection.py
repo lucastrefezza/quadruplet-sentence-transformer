@@ -1,17 +1,46 @@
 import random
 import math
-from typing import Union, List
+from typing import Union, List, Optional
 import nlpaug.augmenter.word as naw
 from dataset.backtranslation import perform_back_translation
 from sentence_transformers import SentenceTransformer, util
 import torch
+from utils.synchronization import synchronized
 from dataset.constants import *
 
 TOP_K_BACKUP: final = 2
 
+'''class SingletonEmbedder(object):
+    """
+    Sentence BERT-based embedder singleton class.
+    """
+    _self = None
+    
+    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._model = SentenceTransformer(model_name).to(device)
+        
+    def get_embedder(self) -> SentenceTransformer:
+        return self._model
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._self is None:
+            cls._self = super().__new__(cls, *args, **kwargs)
+        return cls._self'''
 
+# Singleton, shared-state sentence embedder
+embedder_singleton: Optional[SentenceTransformer] = None
+
+
+@synchronized
 def get_embedder(model_name: str = 'all-MiniLM-L6-v2') -> SentenceTransformer:
-    return SentenceTransformer(model_name)
+    """Gets the singleton Sentence BERT-based embedder"""
+    # return SingletonEmbedder(model_name).get_embedder()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    global embedder_singleton
+    if embedder_singleton is None:
+        embedder_singleton = SentenceTransformer(model_name).to(device)
+    return embedder_singleton
 
 
 def back_translation(captions: List[str]) -> List[str]:

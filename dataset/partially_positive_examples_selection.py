@@ -5,13 +5,11 @@ import re
 from nltk.tag import pos_tag
 from nltk.tokenize import word_tokenize
 import nlpaug.augmenter.word as naw
-
-from dataset.dataset_creation import parse_llm_response, mock_llm_response
 from dataset.positive_examples_selection import back_translation
 import openai
-
 from dataset.constants import NO_REPLACE_WORDS, N_PART_EXAMPLES, ADAPTIVE_CROP_AUGMENT, CHAT_GPT, FALCON, ALPACA, \
-    ADAPTIVE_CROP, CHUNK_DIM, N_EXAMPLES, SIMILARITY_THRESHOLD
+    ADAPTIVE_CROP
+
 
 MAX_WORDS_TO_REPLACE: final = 6
 REPLACE_BERT: final = "replace_bert"
@@ -19,6 +17,27 @@ REPLACE_WORDNET: final = "replace_wordnet"
 REPLACE_GLOVE: final = "replace_glove"
 BACKTRANSL: final = "backtranslation"
 MAX_INSERT_WORDS: final = 1
+MIN_RESPONSE_NUM: final = 5
+
+
+def mock_llm_response(caption: str, n_responses: int = MIN_RESPONSE_NUM) -> str:
+    return "1. Woman wearing a hat;  2. Woman taking a photo;  3. Woman riding " \
+           "a bike;  4. Parking lot surrounded by trees;  5. Woman standing in " \
+           "the parking lot."
+
+
+def parse_llm_response(llm_response: str, min_response_num: int = MIN_RESPONSE_NUM) -> List[str]:
+    # Split the response on the numbers discarding the first, empty one
+    responses = re.split(string=llm_response, pattern=r"[0-9]\.")[1:]
+
+    # Check if the number of created sub-phrases is correct
+    assert len(responses) >= min_response_num
+
+    # Format the sub-phrases correctly, removing semi-column, spaces, ...
+    for i, response in enumerate(responses):
+        responses[i] = response.strip().lower().replace(";", "").replace(".", "")
+
+    return responses
 
 
 def crop_text_based_on_tagging(text: str,

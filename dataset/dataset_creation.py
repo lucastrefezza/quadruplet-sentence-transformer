@@ -5,22 +5,14 @@ from typing import Optional, Callable, List, final
 
 import torch
 import torchvision.datasets as datasets
-import torchvision.transforms as transforms
-from sentence_transformers import SentenceTransformer, util
 from PIL import Image
-import nltk
-from transformers import MarianMTModel, MarianTokenizer
-
 import tqdm
 import json
 import traceback
-
 from dataset.constants import CHUNK_DIM, N_EXAMPLES, N_PART_EXAMPLES, SIMILARITY_THRESHOLD, ADAPTIVE_CROP, INSTANCES, \
-    ID, REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, DATASET_NAME, ANNOTATION_FILE, CHUNK_NAME
+    ID, REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, DATASET_NAME_DEFAULT, ANNOTATION_FILE, CHUNK_NAME
 from dataset.partially_positive_examples_selection import get_part_pos_examples
 from dataset.positive_examples_selection import select_positive_examples
-
-MIN_RESPONSE_NUM: final = 5
 
 
 class CocoCaptionsOnly(datasets.CocoCaptions):
@@ -48,33 +40,8 @@ class CocoCaptionsOnly(datasets.CocoCaptions):
 
     def _load_image(self, id: int) -> Image.Image:
         # Return mock empty image because we need caption only
-        return torch.zeros(3, 427, 640)
-
-
-def mock_llm_response(caption: str, n_responses: int = MIN_RESPONSE_NUM) -> str:
-    return "1. Woman wearing a hat;  2. Woman taking a photo;  3. Woman riding " \
-           "a bike;  4. Parking lot surrounded by trees;  5. Woman standing in " \
-           "the parking lot."
-
-
-def parse_llm_response(llm_response: str, min_response_num: int = MIN_RESPONSE_NUM) -> List[str]:
-    # Split the response on the numbers discarding the first, empty one
-    responses = re.split(string=llm_response, pattern=r"[0-9]\.")[1:]
-
-    # Check if the number of created sub-phrases is correct
-    assert len(responses) >= min_response_num
-
-    # Format the sub-phrases correctly, removing semi-column, spaces, ...
-    for i, response in enumerate(responses):
-        responses[i] = response.strip().lower().replace(";", "").replace(".", "")
-
-    return responses
-
-
-def get_chunk_idx(idx: int, chunk_dim: int = CHUNK_DIM) -> tuple[int, int]:
-    chunk_idx = math.floor(idx / chunk_dim)  # chunk index
-    local_idx = idx % chunk_dim  # local index of the instance inside the chunk
-    return chunk_idx, local_idx
+        # return torch.zeros(3, 427, 640)
+        return Image.new("RGB", (427, 640))
 
 
 def create_dataset_chunk(dataset: CocoCaptionsOnly,
@@ -87,7 +54,7 @@ def create_dataset_chunk(dataset: CocoCaptionsOnly,
     end_idx: int = min(start_idx + chunk_dim, len(dataset))  # end index
 
     dataset_chunk = {
-        DATASET_NAME: dataset.dataset_name,
+        DATASET_NAME_DEFAULT: dataset.dataset_name,
         ANNOTATION_FILE: dataset.ann_file,
         INSTANCES: []
     }
@@ -128,7 +95,7 @@ def create_dataset_chunk(dataset: CocoCaptionsOnly,
 def create_dataset(root: str,
                    dataset: CocoCaptionsOnly,
                    start_chunk: int = 0,
-                   max_chunk: Optional[int] = None,
+                   last_chunk: Optional[int] = None,
                    chunk_dim: int = CHUNK_DIM,
                    n_pos_examples: int = N_EXAMPLES,
                    n_part_pos_examples: int = N_PART_EXAMPLES,
@@ -140,13 +107,13 @@ def create_dataset(root: str,
     os.makedirs(root, exist_ok=True)
 
     # Calculate max chunk
-    chunk_num = math.ceil(len(dataset) / chunk_dim)
-    chunk_num = chunk_num if max_chunk is None else min(chunk_num, max_chunk)
+    chunk_num = math.ceil(len(dataset) / chunk_dim) - start_chunk
+    chunk_num = chunk_num if last_chunk is None else min(chunk_num, last_chunk - start_chunk + 1)
 
     # For each chunk
-    iterable = range(start_chunk, chunk_num)
+    iterable = range(start_chunk, start_chunk + chunk_num)
     iterable = tqdm.tqdm(iterable, "Creating chunks...") if log_tqdm else iterable
-    last_chunk_idx = -1
+    last_created_chunk_idx = -1
     for chunk_idx in iterable:
 
         try:
@@ -164,14 +131,11 @@ def create_dataset(root: str,
             chunk_filename = os.path.join(root, f"{CHUNK_NAME}_{chunk_idx}.json")
             with open(chunk_filename, "w") as fp:
                 json.dump(dataset_chunk, fp)
-            last_chunk_idx = chunk_idx
+            last_created_chunk_idx = chunk_idx
 
         except Exception as e:
             print(f"Chunk {chunk_idx} creation failed due to error: {e}.")
             print(f"Traceback: {traceback.format_exc()}")
             return chunk_idx - 1
 
-    return last_chunk_idx
-
-# skip this if already created
-# create_dataset("./data/coco/train", dataset=cap_train, max_chunk=None, log_tqdm=True)
+    return last_created_chunk_idx
