@@ -1,1 +1,1 @@
-# contextual-semantic-retrieval
+# Quadruplet Sentence Transformer
