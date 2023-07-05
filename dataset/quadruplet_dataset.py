@@ -376,7 +376,7 @@ class QuadrupletDataset(Dataset):
         instances = []
         # For each index
         for i in idx:
-            # Get the corresponsing chunk and instance
+            # Get the corresponding chunk and instance
             chunk, local_idx, chunk_idx = self.__get_chunk(i)
             instance = chunk[INSTANCES][local_idx]
 

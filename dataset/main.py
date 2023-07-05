@@ -4,7 +4,7 @@ import math
 from dataset.constants import COCO_CAPTIONS_TRAIN, COCO_CAPTIONS_VAL, CLEANED_COCO_TRAIN, CLEANED_COCO_VAL, \
     CLEANED_COCO_TEST, COCO_DS_TYPE, SENTENCE_SUMMARIZATION_DS_TYPE, RAW_DATA, COCO_DS_NAME, CHUNK_DIM, N_EXAMPLES, \
     N_PART_EXAMPLES, SIMILARITY_THRESHOLD
-from dataset.dataset_creation import create_dataset, CocoCaptionsOnly
+from dataset.coco_dataset_creation import create_coco_dataset, CocoCaptionsOnly
 from dataset.quadruplet_dataset import QuadrupletDataset, RANDOM
 
 
@@ -43,7 +43,7 @@ def main(args):
         print(f"Total chunk number test: {math.ceil(len(cap_test) / args.chunk_dim)}")
         print(f"Total chunk number train: {math.ceil(len(cap_train) / args.chunk_dim)}")
         print(f"Creating test dataset in {args.test_out_path}")
-        create_dataset(
+        create_coco_dataset(
             root=args.test_out_path,
             dataset=cap_test,
             start_chunk=args.start_chunk_test,
@@ -56,7 +56,7 @@ def main(args):
             log_tqdm=args.verbose_creation
         )
         print(f"Creating train dataset in {args.train_out_path}")
-        create_dataset(
+        create_coco_dataset(
             root=args.train_out_path,
             dataset=cap_train,
             start_chunk=args.start_chunk_train,
@@ -119,7 +119,7 @@ if __name__ == '__main__':
     parser.add_argument('--raw_data_root', type=str, default=RAW_DATA,
                         help='raw data root (must contain an "images" empty subdir)')
     parser.add_argument('--dataset_name', type=str, default=COCO_DS_NAME, help='cleaned dataset folder name')
-    parser.add_argument("--raw_train_path", type=str, default=COCO_CAPTIONS_TRAIN, help='train dataset path')
+    parser.add_argument('--raw_train_path', type=str, default=COCO_CAPTIONS_TRAIN, help='train dataset path')
     parser.add_argument('--raw_val_path', type=str, default=COCO_CAPTIONS_VAL, help='val dataset path')
     parser.add_argument('--train_out_path', type=str, default=CLEANED_COCO_TRAIN, help='train set output path')
     parser.add_argument('--test_out_path', type=str, default=CLEANED_COCO_TEST, help='test set output path')
