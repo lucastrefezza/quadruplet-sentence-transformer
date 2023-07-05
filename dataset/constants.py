@@ -25,7 +25,7 @@ PART_POS_EXAMPLES: final = "part_positive"
 CHUNK_NAME: final = "chunk"
 ANNOTATION_FILE: final = "ann_file"
 INSTANCES: final = "instances"
-DATASET_NAME_DEFAULT: final = "dataset_name"
+DATASET_NAME: final = "dataset_name"
 
 
 # Paths

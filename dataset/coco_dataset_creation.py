@@ -1,16 +1,13 @@
 import math
 import os
-import re
-from typing import Optional, Callable, List, final
-
-import torch
+from typing import Optional, Callable
 import torchvision.datasets as datasets
 from PIL import Image
 import tqdm
 import json
 import traceback
 from dataset.constants import CHUNK_DIM, N_EXAMPLES, N_PART_EXAMPLES, SIMILARITY_THRESHOLD, ADAPTIVE_CROP, INSTANCES, \
-    ID, REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, DATASET_NAME_DEFAULT, ANNOTATION_FILE, CHUNK_NAME
+    ID, REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, DATASET_NAME, ANNOTATION_FILE, CHUNK_NAME, DATASET_NAME
 from dataset.partially_positive_examples_selection import get_part_pos_examples
 from dataset.positive_examples_selection import select_positive_examples
 
@@ -44,17 +41,17 @@ class CocoCaptionsOnly(datasets.CocoCaptions):
         return Image.new("RGB", (427, 640))
 
 
-def create_dataset_chunk(dataset: CocoCaptionsOnly,
-                         start_idx: int = 0,
-                         chunk_dim: int = CHUNK_DIM,
-                         n_pos_examples: int = N_EXAMPLES,
-                         n_part_pos_examples: int = N_PART_EXAMPLES,
-                         sim_threshold: float = SIMILARITY_THRESHOLD,
-                         augment: bool = True) -> dict:
+def create_coco_dataset_chunk(dataset: CocoCaptionsOnly,
+                              start_idx: int = 0,
+                              chunk_dim: int = CHUNK_DIM,
+                              n_pos_examples: int = N_EXAMPLES,
+                              n_part_pos_examples: int = N_PART_EXAMPLES,
+                              sim_threshold: float = SIMILARITY_THRESHOLD,
+                              augment: bool = True) -> dict:
     end_idx: int = min(start_idx + chunk_dim, len(dataset))  # end index
 
     dataset_chunk = {
-        DATASET_NAME_DEFAULT: dataset.dataset_name,
+        DATASET_NAME: dataset.dataset_name,
         ANNOTATION_FILE: dataset.ann_file,
         INSTANCES: []
     }
@@ -92,16 +89,16 @@ def create_dataset_chunk(dataset: CocoCaptionsOnly,
     return dataset_chunk
 
 
-def create_dataset(root: str,
-                   dataset: CocoCaptionsOnly,
-                   start_chunk: int = 0,
-                   last_chunk: Optional[int] = None,
-                   chunk_dim: int = CHUNK_DIM,
-                   n_pos_examples: int = N_EXAMPLES,
-                   n_part_pos_examples: int = N_PART_EXAMPLES,
-                   sim_threshold: float = SIMILARITY_THRESHOLD,
-                   augment: bool = True,
-                   log_tqdm: bool = False) -> int:
+def create_coco_dataset(root: str,
+                        dataset: CocoCaptionsOnly,
+                        start_chunk: int = 0,
+                        last_chunk: Optional[int] = None,
+                        chunk_dim: int = CHUNK_DIM,
+                        n_pos_examples: int = N_EXAMPLES,
+                        n_part_pos_examples: int = N_PART_EXAMPLES,
+                        sim_threshold: float = SIMILARITY_THRESHOLD,
+                        augment: bool = True,
+                        log_tqdm: bool = False) -> int:
     # Create dataset directory if it doesn't exist
     root = os.path.join(root, dataset.dataset_name)
     os.makedirs(root, exist_ok=True)
@@ -118,7 +115,7 @@ def create_dataset(root: str,
 
         try:
             # Create the chunk
-            dataset_chunk = create_dataset_chunk(
+            dataset_chunk = create_coco_dataset_chunk(
                 dataset=dataset,
                 start_idx=chunk_idx * chunk_dim,
                 n_pos_examples=n_pos_examples,
