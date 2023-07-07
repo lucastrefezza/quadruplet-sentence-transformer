@@ -302,3 +302,4 @@ class GammaQuadrupletLoss(QuadrupletLoss):
                                      swap=self.swap,
                                      reduction=reduction)
 
+
