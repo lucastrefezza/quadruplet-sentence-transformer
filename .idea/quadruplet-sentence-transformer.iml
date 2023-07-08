@@ -4,6 +4,7 @@
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/data" />
       <excludeFolder url="file://$MODULE_DIR$/pycocotools.egg-info" />
+      <excludeFolder url="file://$MODULE_DIR$/trained" />
     </content>
     <orderEntry type="jdk" jdkName="nlp2" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
