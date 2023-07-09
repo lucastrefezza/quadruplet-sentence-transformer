@@ -206,11 +206,22 @@ class QuadrupletEvaluator(SentenceEvaluator):
             anchors.append(example[REFERENCE_EXAMPLE])
 
             # Get one random positive, negative and partially positive
-            positives.append(example[POS_EXAMPLES][random.randint(0, len(example[POS_EXAMPLES]) - 1)])
-            partially_positives.append(
-                example[PART_POS_EXAMPLES][random.randint(0, len(example[PART_POS_EXAMPLES]) - 1)]
-            )
-            negatives.append(example[NEG_EXAMPLES][random.randint(0, len(example[NEG_EXAMPLES]) - 1)])
+            if isinstance(example[POS_EXAMPLES], list):
+                positives.append(example[POS_EXAMPLES][random.randint(0, len(example[POS_EXAMPLES]) - 1)])
+            else:
+                positives.append(example[POS_EXAMPLES])
+
+            if isinstance(example[PART_POS_EXAMPLES], list):
+                partially_positives.append(
+                    example[PART_POS_EXAMPLES][random.randint(0, len(example[PART_POS_EXAMPLES]) - 1)]
+                )
+            else:
+                partially_positives.append(example[PART_POS_EXAMPLES])
+
+            if isinstance(example[NEG_EXAMPLES], list):
+                negatives.append(example[NEG_EXAMPLES][random.randint(0, len(example[NEG_EXAMPLES]) - 1)])
+            else:
+                negatives.append(example[NEG_EXAMPLES])
 
         return cls(anchors, positives, partially_positives, negatives, all_examples=examples, **kwargs)
 
@@ -228,11 +239,22 @@ class QuadrupletEvaluator(SentenceEvaluator):
                 self.anchors.append(example[REFERENCE_EXAMPLE])
 
                 # Get one random positive, negative and partially positive
-                positives.append(example[POS_EXAMPLES][random.randint(0, len(example[POS_EXAMPLES]) - 1)])
-                partially_positives.append(
-                    example[PART_POS_EXAMPLES][random.randint(0, len(example[PART_POS_EXAMPLES]) - 1)]
-                )
-                negatives.append(example[NEG_EXAMPLES][random.randint(0, len(example[NEG_EXAMPLES]) - 1)])
+                if isinstance(example[POS_EXAMPLES], list):
+                    positives.append(example[POS_EXAMPLES][random.randint(0, len(example[POS_EXAMPLES]) - 1)])
+                else:
+                    positives.append(example[POS_EXAMPLES])
+
+                if isinstance(example[PART_POS_EXAMPLES], list):
+                    partially_positives.append(
+                        example[PART_POS_EXAMPLES][random.randint(0, len(example[PART_POS_EXAMPLES]) - 1)]
+                    )
+                else:
+                    partially_positives.append(example[PART_POS_EXAMPLES])
+
+                if isinstance(example[NEG_EXAMPLES], list):
+                    negatives.append(example[NEG_EXAMPLES][random.randint(0, len(example[NEG_EXAMPLES]) - 1)])
+                else:
+                    negatives.append(example[NEG_EXAMPLES])
 
                 self._pos_part_triplet = TripletEvaluator(
                     anchors=anchors,

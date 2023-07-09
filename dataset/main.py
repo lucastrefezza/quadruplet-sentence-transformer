@@ -1,6 +1,9 @@
 import argparse
 import os
 import math
+
+import torch
+
 from dataset.constants import COCO_CAPTIONS_TRAIN, COCO_CAPTIONS_VAL, CLEANED_COCO_TRAIN, CLEANED_COCO_VAL, \
     CLEANED_COCO_TEST, COCO_DS_TYPE, SENTENCE_SUMMARIZATION_DS_TYPE, RAW_DATA, COCO_DS_NAME, CHUNK_DIM, N_EXAMPLES, \
     N_PART_EXAMPLES, SIMILARITY_THRESHOLD
@@ -43,7 +46,7 @@ def main(args):
         print(f"Total chunk number test: {math.ceil(len(cap_test) / args.chunk_dim)}")
         print(f"Total chunk number train: {math.ceil(len(cap_train) / args.chunk_dim)}")
         print(f"Creating test dataset in {args.test_out_path}")
-        create_coco_dataset(
+        chunk_n = 1 + create_coco_dataset(
             root=args.test_out_path,
             dataset=cap_test,
             start_chunk=args.start_chunk_test,
@@ -55,8 +58,10 @@ def main(args):
             augment=True,
             log_tqdm=args.verbose_creation
         )
+        torch.save(chunk_n, os.path.join(args.test_out_path, cap_test.dataset_name, "chunk_n.pt"))
+
         print(f"Creating train dataset in {args.train_out_path}")
-        create_coco_dataset(
+        chunk_n = 1 + create_coco_dataset(
             root=args.train_out_path,
             dataset=cap_train,
             start_chunk=args.start_chunk_train,
@@ -68,6 +73,7 @@ def main(args):
             augment=True,
             log_tqdm=args.verbose_creation
         )
+        torch.save(chunk_n, os.path.join(args.train_out_path, cap_train.dataset_name, "chunk_n.pt"))
         print("Dataset creation completed.")
 
         if args.verbose_check:
