@@ -42,3 +42,4 @@ CLEANED_COCO_TEST: final = os.path.join(CLEANED_COCO_DIR, "test")
 COCO_DS_TYPE: final = "coco"
 SENTENCE_SUMMARIZATION_DS_TYPE: final = "sentence_summarization"
 COCO_DS_NAME: final = "coco_ds"
+OUTPUT_PATH: final = "trained"
