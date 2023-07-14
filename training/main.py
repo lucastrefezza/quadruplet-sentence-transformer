@@ -3,7 +3,7 @@ import os
 import torch
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.util import cos_sim, dot_score
-from torch.utils.data import random_split, DataLoader
+from torch.utils.data import random_split, DataLoader, Subset
 from dataset.constants import CLEANED_COCO_TRAIN, OUTPUT_PATH
 from dataset.quadruplet_dataset import QuadrupletDataset, RANDOM, HARD_CONTRASTIVE_TRAIN, CACHE_SIZE_DEFAULT
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel, to_input_example
@@ -26,8 +26,20 @@ def main(args):
                             n_part_pos=args.n_part_pos,
                             cache_size=args.cache_size,
                             transform=to_input_example)
+
+    # Needed for information retrieval evaluation (this sucks but there seems not to be another way)
+    nt_qds = QuadrupletDataset(args.dataset_path_train,
+                               *[f"chunk_{i}.json" for i in range(0, chunk_n)],
+                               hard_contrastive_mode=hard_contrastive_mode,
+                               n_pos=args.n_pos,
+                               n_neg=args.n_neg,
+                               n_part_pos=args.n_part_pos,
+                               cache_size=args.cache_size,
+                               transform=None)
+
     train_set, val_set = random_split(dataset=qds, lengths=[1 - args.validation_split, args.validation_split])
     dl_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    no_transform_val_set = Subset(nt_qds, val_set.indices)
 
     # Create the loss
     quadruplet_loss = GammaQuadrupletLoss(
@@ -47,6 +59,7 @@ def main(args):
         del score_functions['cos_sim']
     evaluator = get_sequential_evaluator(
         dataset=val_set,
+        no_transform_dataset=no_transform_val_set,
         loss=quadruplet_loss,
         evaluation_queries_path=args.evaluation_queries_path,
         corpus_chunk_size=args.corpus_chunk_size,
@@ -62,7 +75,6 @@ def main(args):
         main_score_function=None,
         main_distance_function=None,
         name=experiment_name,
-        data_loader_sampler=None,
         use_amp=args.use_amp
     )
 

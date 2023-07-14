@@ -62,10 +62,6 @@ def generate_variations(sentence: Union[str, List[str]],
     return sentences
 
 
-print(generate_variations(
-    "A woman wearing a strange hat is taking a photo, sitting on her bike in a parking lot surrounded by trees.", n=5))
-
-
 def get_pos_examples_sentence_compr(sentence_compression_instance: Dict,
                                     n: int) -> Tuple[List[str], str]:
     reference_text = sentence_compression_instance[GRAPH][SENTENCE]

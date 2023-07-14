@@ -11,10 +11,11 @@ from sentence_transformers.evaluation import SentenceEvaluator, SimilarityFuncti
 from sentence_transformers.util import cos_sim, dot_score
 from torch import Tensor
 from torch.cuda.amp import autocast
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from dataset.constants import REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, NEG_EXAMPLES
 from dataset.quadruplet_dataset import QuadrupletDataset
+from dataset.sentence_compr_dataset_creation import generate_variations
 from models.losses import GammaQuadrupletLoss
 from models.losses.losses import QuadrupletLoss
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel
@@ -24,13 +25,15 @@ LOGGER = logging.getLogger(__name__)
 
 class QuadrupletLossEvaluator(SentenceEvaluator):
     def __init__(self,
-                 data_loader: DataLoader,
+                 quadruplet_dataset: QuadrupletDataset,
                  quadruplet_loss: QuadrupletLoss,
+                 batch_size: int = 32,
                  additional_model_kwargs: Optional[List[str]] = None,
                  additional_loss_kwargs: Optional[List[str]] = None,
                  use_amp: bool = False):
-        self._data_loader = data_loader
+        self._quadruplet_dataset = quadruplet_dataset
         self._quadruplet_loss = quadruplet_loss
+        self._batch_size = batch_size
         self._additional_model_kwargs = additional_model_kwargs
         self._additional_loss_kwargs = additional_loss_kwargs
         self._use_amp = use_amp
@@ -62,9 +65,13 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
         )
 
         average_loss = 0.0
-
+        smart_batching_dl = DataLoader(
+            dataset=self._quadruplet_dataset,
+            batch_size=self._batch_size,
+            collate_fn=model.smart_batching_collate
+        )
         with torch.no_grad():
-            for i, instance in enumerate(self._data_loader):
+            for i, instance in tqdm(enumerate(smart_batching_dl), desc="Evaluating quadruplet loss..."):
                 features, labels = instance
                 labels = labels.to(model.device)
 
@@ -202,7 +209,7 @@ class QuadrupletEvaluator(SentenceEvaluator):
         negatives = []
 
         # noinspection PyTypeChecker
-        for example in tqdm(examples):
+        for example in tqdm(examples, desc="Sampling examples for QuadrupletEvaluator..."):
             if isinstance(example, tuple):
                 example, _ = example
             if isinstance(example, InputExample):
@@ -247,7 +254,7 @@ class QuadrupletEvaluator(SentenceEvaluator):
             negatives = []
 
             # noinspection PyTypeChecker
-            for example in tqdm(self._all_examples):
+            for example in tqdm(self._all_examples, desc="Re-sampling examples for QuadrupletEvaluator..."):
                 if isinstance(example, tuple):
                     example, _ = example
                 if isinstance(example, InputExample):
@@ -379,8 +386,12 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
 
         # If the current instance has been selected
         if idx in indexes:
+            query_example = dataset[idx][REFERENCE_EXAMPLE]
+            # Randomly choose if doing variations on the query (to enhance evaluation variability)
+            query_example = generate_variations()
+
             # Use the reference example as query
-            ir_evaluation_set["queries"][str(query_idx)] = dataset[idx][REFERENCE_EXAMPLE]
+            ir_evaluation_set["queries"][str(query_idx)] = query_example
 
             # Add the positives and partially positives to relevant items
             ir_evaluation_set["relevant"][str(query_idx)] = set()
@@ -413,6 +424,7 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
 def get_sequential_evaluator(dataset: QuadrupletDataset,
                              loss: GammaQuadrupletLoss,
                              evaluation_queries_path: Optional[str] = None,
+                             no_transform_dataset: Optional[Union[QuadrupletDataset, Subset]] = None,
                              corpus_chunk_size: int = 50000,
                              mrr_at_k: List[int] = [10],
                              ndcg_at_k: List[int] = [10],
@@ -427,7 +439,6 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
                              main_score_function: str = None,
                              main_distance_function: SimilarityFunction = None,
                              name: str = '',
-                             data_loader_sampler=None,
                              additional_model_kwargs: Optional[List[str]] = None,
                              additional_loss_kwargs: Optional[List[str]] = None,
                              use_amp: bool = False) -> SequentialEvaluator:
@@ -442,8 +453,10 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
         except IOError as e:
             evaluation_queries = None
             print(f"Error: {evaluation_queries_path} file could not be opened due to error: {e}")
+    elif no_transform_dataset is not None:
+        evaluation_queries = create_ir_evaluation_set(no_transform_dataset)
     else:
-        evaluation_queries = create_ir_evaluation_set(dataset)
+        evaluation_queries = None
 
     evaluators = []
     if evaluation_queries is not None:
@@ -478,13 +491,14 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
     evaluators.append(quadruplet_evaluator)
 
     # Loss will be the main score function, so it must be the last one
-    data_loader = DataLoader(dataset=dataset, batch_size=batch_size, sampler=data_loader_sampler)
+    # data_loader = DataLoader(dataset=dataset, batch_size=batch_size, sampler=data_loader_sampler)
     quadruplet_loss_evaluator = QuadrupletLossEvaluator(
-        data_loader=data_loader,
+        quadruplet_dataset=dataset,
         quadruplet_loss=loss,
         additional_model_kwargs=additional_model_kwargs,
         additional_loss_kwargs=additional_loss_kwargs,
-        use_amp=use_amp
+        use_amp=use_amp,
+        batch_size=batch_size
     )
     evaluators.append(quadruplet_loss_evaluator)
 

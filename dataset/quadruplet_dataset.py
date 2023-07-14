@@ -176,6 +176,9 @@ class QuadrupletDataset(Dataset):
     def cache_size(self) -> int:
         return self.__cache_size
 
+    #def remove_transforms(self):
+    #    self._transform = None
+
     def __len__(self) -> int:
         return (self.n_chunks - 1) * self.chunk_dim + self.last_chunk_dim
 
