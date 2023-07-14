@@ -6,7 +6,7 @@ from sentence_transformers.util import cos_sim, dot_score
 from torch.utils.data import random_split, DataLoader
 from dataset.constants import CLEANED_COCO_TRAIN, OUTPUT_PATH
 from dataset.quadruplet_dataset import QuadrupletDataset, RANDOM, HARD_CONTRASTIVE_TRAIN, CACHE_SIZE_DEFAULT
-from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel
+from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel, to_input_example
 from models.evaluators import get_sequential_evaluator
 from models.losses import GammaQuadrupletLoss
 from models.losses.losses import DEFAULT_GAMMA
@@ -17,14 +17,15 @@ from training.callbacks import EarlyStoppingCallback, EarlyStoppingException
 def main(args):
     # Load the dataset
     chunk_n = torch.load(os.path.join(args.dataset_path_train, "chunk_n.pt"))
+    hard_contrastive_mode = RANDOM if not args.use_hard_contrastive_sampling else HARD_CONTRASTIVE_TRAIN
     qds = QuadrupletDataset(args.dataset_path_train,
                             *[f"chunk_{i}.json" for i in range(0, chunk_n)],
-                            hard_contrastive_mode=RANDOM if not args.use_hard_contrastive_sampling \
-                                else HARD_CONTRASTIVE_TRAIN,
+                            hard_contrastive_mode=hard_contrastive_mode,
                             n_pos=args.n_pos,
                             n_neg=args.n_neg,
                             n_part_pos=args.n_part_pos,
-                            cache_size=args.cache_size)
+                            cache_size=args.cache_size,
+                            transform=to_input_example)
     train_set, val_set = random_split(dataset=qds, lengths=[1 - args.validation_split, args.validation_split])
     dl_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0)
 
@@ -169,9 +170,9 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=DEFAULT_GAMMA, help='gamma parameter in gamma quadruplet loss')
     parser.add_argument('--margin_pos_neg', type=float, default=1.0,
                         help='margin between positive and negative examples')
-    parser.add_argument('--margin_pos_part', type=float, default=1.0,
+    parser.add_argument('--margin_pos_part', type=float, default=0.5,
                         help='margin between positive and partially positive examples')
-    parser.add_argument('--margin_part_neg', type=float, default=1.0,
+    parser.add_argument('--margin_part_neg', type=float, default=0.5,
                         help='margin between partially positive and negative examples')
     parser.add_argument('--p', type=float, default=2.0, help='p-norm type to use in the loss')
 
@@ -185,13 +186,13 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_steps', type=int, default=10000, help='the number of warmup steps')
     parser.add_argument('--learning_rate', type=float, default=2e-5, help='the learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.01, help='the weight decay rate')
-    parser.add_argument('--evaluation_steps', type=int, default=0,
+    parser.add_argument('--evaluation_steps', type=int, default=1000,
                         help='if > 0, an evaluation step is performed after that much training steps')
     parser.add_argument('--save_best_model', type=bool, default=True, help='whether to save the best model')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, help='the maximum gradient norm')
     parser.add_argument('--checkpoint_save_steps', type=int, default=1000,
                         help='every how many steps save a checkpoint')
-    parser.add_argument('--checkpoint_save_steps', type=int, default=0,
+    parser.add_argument('--checkpoint_save_total_limit', type=int, default=0,
                         help='the max number of checkpoint to save')
     parser.add_argument('--early_stopping_patience', type=int, default=5, help='early stopping patience (in epochs)')
     parser.add_argument('--early_stopping_delta', type=float, default=0.0,

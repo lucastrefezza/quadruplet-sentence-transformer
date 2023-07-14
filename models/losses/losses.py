@@ -2,7 +2,7 @@ import torch
 from torch.nn.functional import triplet_margin_loss, binary_cross_entropy_with_logits
 from typing import final, Optional
 
-DEFAULT_GAMMA: final = 0.8
+DEFAULT_GAMMA: final = 0.6
 REDUCTIONS: final = frozenset(["mean", "sum", "none"])
 
 
@@ -12,8 +12,8 @@ def gamma_quadruplet_loss(x_anchor: torch.Tensor,
                           x_neg: torch.Tensor,
                           gamma: float = DEFAULT_GAMMA,
                           margin_pos_neg: float = 1.0,
-                          margin_pos_part: float = 1.0,
-                          margin_part_neg: float = 1.0,
+                          margin_pos_part: float = 0.5,
+                          margin_part_neg: float = 0.5,
                           p: float = 2.0,
                           swap: bool = False,
                           reduction: str = "mean") -> torch.Tensor:

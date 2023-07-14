@@ -28,15 +28,14 @@ def get_chunk_idx(idx: int, chunk_dim: int = CHUNK_DIM) -> tuple[int, int]:
     return chunk_idx, local_idx
 
 
-def hard_constrastive_sampling(population: List,
-                               scores: Union[np.ndarray, List[float]],
-                               k: int,
-                               max_mode: bool = True) -> List:
-    # TODO: test if it's correct checking scores of the outputed captions
+def hard_contrastive_sampling(population: List,
+                              scores: Union[np.ndarray, List[float]],
+                              k: int,
+                              max_mode: bool = True) -> List:
     if max_mode:
-        key = lambda idx, score: score  # should select maximum
+        key = lambda score: score[1]  # should select maximum
     else:
-        key = lambda idx, score: -score  # should select minimum
+        key = lambda score: -score[1]  # should select minimum
 
     # Select the top-k largest scores
     scores = [(i, score) for i, score in enumerate(scores)]
@@ -240,7 +239,7 @@ class QuadrupletDataset(Dataset):
         if diff > 0:
             if hard_contrastive_mode == HARD_CONTRASTIVE_TRAIN:
                 # Select the hardest
-                selected_captions_total = hard_constrastive_sampling(
+                selected_captions_total = hard_contrastive_sampling(
                     population=selected_captions_total,
                     scores=cos_scores,
                     max_mode=True,
