@@ -5,19 +5,19 @@ import os
 import random
 from typing import Optional, List, Callable, Dict, Union, Set, final
 import torch
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, InputExample
 from sentence_transformers.evaluation import SentenceEvaluator, SimilarityFunction, TripletEvaluator, \
     SequentialEvaluator, InformationRetrievalEvaluator
 from sentence_transformers.util import cos_sim, dot_score
 from torch import Tensor
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from dataset.constants import REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, NEG_EXAMPLES
 from dataset.quadruplet_dataset import QuadrupletDataset
 from models.losses import GammaQuadrupletLoss
 from models.losses.losses import QuadrupletLoss
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -201,44 +201,22 @@ class QuadrupletEvaluator(SentenceEvaluator):
         partially_positives = []
         negatives = []
 
-        for example in examples:
-            # Get the anchor
-            anchors.append(example[REFERENCE_EXAMPLE])
-
-            # Get one random positive, negative and partially positive
-            if isinstance(example[POS_EXAMPLES], list):
-                positives.append(example[POS_EXAMPLES][random.randint(0, len(example[POS_EXAMPLES]) - 1)])
+        # noinspection PyTypeChecker
+        for example in tqdm(examples):
+            if isinstance(example, tuple):
+                example, _ = example
+            if isinstance(example, InputExample):
+                texts = example.texts
+                anchors.append(texts[0])
+                positives.append(texts[1])
+                partially_positives.append(texts[2])
+                negatives.append(texts[3])
             else:
-                positives.append(example[POS_EXAMPLES])
 
-            if isinstance(example[PART_POS_EXAMPLES], list):
-                partially_positives.append(
-                    example[PART_POS_EXAMPLES][random.randint(0, len(example[PART_POS_EXAMPLES]) - 1)]
-                )
-            else:
-                partially_positives.append(example[PART_POS_EXAMPLES])
-
-            if isinstance(example[NEG_EXAMPLES], list):
-                negatives.append(example[NEG_EXAMPLES][random.randint(0, len(example[NEG_EXAMPLES]) - 1)])
-            else:
-                negatives.append(example[NEG_EXAMPLES])
-
-        return cls(anchors, positives, partially_positives, negatives, all_examples=examples, **kwargs)
-
-    def _reset_examples(self):
-        self._epoch_counter += 1  # increase epoch counter
-
-        # Every N_EPOCHS_RESET epochs, reset the positive, negative and partially positive examples by resampling them
-        if self._all_examples is not None and self._epoch_counter % self.N_EPOCHS_RESET_EXAMPLES == 0:
-            anchors = []
-            positives = []
-            partially_positives = []
-            negatives = []
-            for example in self._all_examples:
                 # Get the anchor
-                self.anchors.append(example[REFERENCE_EXAMPLE])
+                anchors.append(example[REFERENCE_EXAMPLE])
 
-                # Get one random positive, negative and partially positive
+                # Get one random positive, partially positive and negative
                 if isinstance(example[POS_EXAMPLES], list):
                     positives.append(example[POS_EXAMPLES][random.randint(0, len(example[POS_EXAMPLES]) - 1)])
                 else:
@@ -255,6 +233,53 @@ class QuadrupletEvaluator(SentenceEvaluator):
                     negatives.append(example[NEG_EXAMPLES][random.randint(0, len(example[NEG_EXAMPLES]) - 1)])
                 else:
                     negatives.append(example[NEG_EXAMPLES])
+
+        return cls(anchors, positives, partially_positives, negatives, all_examples=examples, **kwargs)
+
+    def _reset_examples(self):
+        self._epoch_counter += 1  # increase epoch counter
+
+        # Every N_EPOCHS_RESET epochs, reset the positive, negative and partially positive examples by resampling them
+        if self._all_examples is not None and self._epoch_counter % self.N_EPOCHS_RESET_EXAMPLES == 0:
+            anchors = []
+            positives = []
+            partially_positives = []
+            negatives = []
+
+            # noinspection PyTypeChecker
+            for example in tqdm(self._all_examples):
+                if isinstance(example, tuple):
+                    example, _ = example
+                if isinstance(example, InputExample):
+                    # Convert to dictionary
+                    texts = example.texts
+
+                    anchors.append(texts[0])
+                    positives.append(texts[1])
+                    partially_positives.append(texts[2])
+                    negatives.append(texts[3])
+                else:
+
+                    # Get the anchor
+                    anchors.append(example[REFERENCE_EXAMPLE])
+
+                    # Get one random positive, negative and partially positive
+                    if isinstance(example[POS_EXAMPLES], list):
+                        positives.append(example[POS_EXAMPLES][random.randint(0, len(example[POS_EXAMPLES]) - 1)])
+                    else:
+                        positives.append(example[POS_EXAMPLES])
+
+                    if isinstance(example[PART_POS_EXAMPLES], list):
+                        partially_positives.append(
+                            example[PART_POS_EXAMPLES][random.randint(0, len(example[PART_POS_EXAMPLES]) - 1)]
+                        )
+                    else:
+                        partially_positives.append(example[PART_POS_EXAMPLES])
+
+                    if isinstance(example[NEG_EXAMPLES], list):
+                        negatives.append(example[NEG_EXAMPLES][random.randint(0, len(example[NEG_EXAMPLES]) - 1)])
+                    else:
+                        negatives.append(example[NEG_EXAMPLES])
 
                 self._pos_part_triplet = TripletEvaluator(
                     anchors=anchors,
@@ -312,7 +337,8 @@ class QuadrupletEvaluator(SentenceEvaluator):
         part_neg_accuracy = self._part_neg_triplet(model, output_path, epoch, steps)
 
         # Compute global accuracy, following the quadruplet loss formula
-        glob_accuracy = (((1-self._gamma) * pos_part_accuracy + self._gamma * part_neg_accuracy) + pos_neg_accuracy)/2
+        glob_accuracy = (((
+                                      1 - self._gamma) * pos_part_accuracy + self._gamma * part_neg_accuracy) + pos_neg_accuracy) / 2
 
         LOGGER.info("Pos-Part Accuracy Distance:   \t{:.2f}".format(pos_part_accuracy * 100))
         LOGGER.info("Pos-Neg Accuracy Distance:   \t{:.2f}".format(pos_neg_accuracy * 100))
@@ -337,6 +363,53 @@ class QuadrupletEvaluator(SentenceEvaluator):
         return glob_accuracy
 
 
+def create_ir_evaluation_set(dataset: QuadrupletDataset,
+                             n_queries: int = 30) -> Dict[str, Dict[str, Union[str, List[str], Set[str]]]]:
+    # TODO: maybe do data augmentation on query
+    indexes = set(random.choices(list(range(0, len(dataset))), k=n_queries))
+
+    ir_evaluation_set = {
+        "queries": {},
+        "corpus": {},
+        "relevant": {}
+    }
+    query_idx = 0
+    corpus_idx = 0
+    for idx, instance in tqdm(enumerate(dataset), desc="Creating information retrieval evaluation set..."):
+
+        # If the current instance has been selected
+        if idx in indexes:
+            # Use the reference example as query
+            ir_evaluation_set["queries"][str(query_idx)] = dataset[idx][REFERENCE_EXAMPLE]
+
+            # Add the positives and partially positives to relevant items
+            ir_evaluation_set["relevant"][str(query_idx)] = set()
+            for example in dataset[idx][POS_EXAMPLES]:
+                ir_evaluation_set["corpus"][str(corpus_idx)] = example
+                ir_evaluation_set["relevant"][str(query_idx)].add(str(corpus_idx))
+                corpus_idx += 1
+            for example in dataset[idx][PART_POS_EXAMPLES]:
+                ir_evaluation_set["corpus"][str(corpus_idx)] = example
+                ir_evaluation_set["relevant"][str(query_idx)].add(str(corpus_idx))
+                corpus_idx += 1
+
+            # Increment the query index
+            query_idx += 1
+
+        else:
+            # Add only the reference/positives/partially positives to the corpus
+            ir_evaluation_set["corpus"][str(corpus_idx)] = dataset[idx][REFERENCE_EXAMPLE]
+            corpus_idx += 1
+            for example in dataset[idx][POS_EXAMPLES]:
+                ir_evaluation_set["corpus"][str(corpus_idx)] = example
+                corpus_idx += 1
+            for example in dataset[idx][PART_POS_EXAMPLES]:
+                ir_evaluation_set["corpus"][str(corpus_idx)] = example
+                corpus_idx += 1
+
+    return ir_evaluation_set
+
+
 def get_sequential_evaluator(dataset: QuadrupletDataset,
                              loss: GammaQuadrupletLoss,
                              evaluation_queries_path: Optional[str] = None,
@@ -354,11 +427,10 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
                              main_score_function: str = None,
                              main_distance_function: SimilarityFunction = None,
                              name: str = '',
-                             data_loader_sampler = None,
+                             data_loader_sampler=None,
                              additional_model_kwargs: Optional[List[str]] = None,
                              additional_loss_kwargs: Optional[List[str]] = None,
                              use_amp: bool = False) -> SequentialEvaluator:
-
     if evaluation_queries_path is not None:
         try:
             with open(evaluation_queries_path, "r") as fp:
@@ -371,7 +443,7 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
             evaluation_queries = None
             print(f"Error: {evaluation_queries_path} file could not be opened due to error: {e}")
     else:
-        evaluation_queries = None
+        evaluation_queries = create_ir_evaluation_set(dataset)
 
     evaluators = []
     if evaluation_queries is not None:
