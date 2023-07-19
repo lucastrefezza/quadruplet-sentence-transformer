@@ -8,7 +8,7 @@ import torch
 from sentence_transformers import SentenceTransformer, InputExample
 from sentence_transformers.evaluation import SentenceEvaluator, SimilarityFunction, TripletEvaluator, \
     SequentialEvaluator, InformationRetrievalEvaluator
-from sentence_transformers.util import cos_sim, dot_score
+from sentence_transformers.util import cos_sim, dot_score, batch_to_device
 from torch import Tensor
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader, Subset
@@ -70,9 +70,13 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
             batch_size=self._batch_size,
             collate_fn=model.smart_batching_collate
         )
+        full_out_path = os.path.join(output_path, "_quadruplet_loss_eval.json")
         with torch.no_grad():
             for i, instance in tqdm(enumerate(smart_batching_dl), desc="Evaluating quadruplet loss..."):
+
                 features, labels = instance
+                # features = features.to(model.device)
+                features = list(map(lambda batch: batch_to_device(batch, model.device), features))
                 labels = labels.to(model.device)
 
                 if self._use_amp:
@@ -87,13 +91,13 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
             log_dict = {
                 "epoch": epoch,
                 "steps": steps,
-                "average_loss": average_loss
+                "average_loss": average_loss.item()
             }
 
-            if not os.path.exists(output_path):
+            if not os.path.exists(full_out_path):
                 full_log_dict: dict[str, list] = {}
             else:
-                with open(output_path, "r") as fp:
+                with open(full_out_path, "r") as fp:
                     full_log_dict: dict[str, list] = json.load(fp)
 
             for k in log_dict:
@@ -101,7 +105,7 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
                     full_log_dict[k] = []
                 full_log_dict[k].append(log_dict[k])
 
-            with open(output_path, "w") as fp:
+            with open(full_out_path, "w") as fp:
                 json.dump(full_log_dict, fp)
 
         return average_loss
@@ -388,7 +392,9 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
         if idx in indexes:
             query_example = dataset[idx][REFERENCE_EXAMPLE]
             # Randomly choose if doing variations on the query (to enhance evaluation variability)
-            query_example = generate_variations()
+            query_example = generate_variations(query_example, n=1)
+            if isinstance(query_example, list):
+                query_example = query_example[0]
 
             # Use the reference example as query
             ir_evaluation_set["queries"][str(query_idx)] = query_example
@@ -442,6 +448,7 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
                              additional_model_kwargs: Optional[List[str]] = None,
                              additional_loss_kwargs: Optional[List[str]] = None,
                              use_amp: bool = False) -> SequentialEvaluator:
+    evaluation_queries = None
     if evaluation_queries_path is not None:
         try:
             with open(evaluation_queries_path, "r") as fp:
@@ -453,9 +460,9 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
         except IOError as e:
             evaluation_queries = None
             print(f"Error: {evaluation_queries_path} file could not be opened due to error: {e}")
-    elif no_transform_dataset is not None:
+    if evaluation_queries is None and no_transform_dataset is not None:
         evaluation_queries = create_ir_evaluation_set(no_transform_dataset)
-    else:
+    elif evaluation_queries_path is None:
         evaluation_queries = None
 
     evaluators = []

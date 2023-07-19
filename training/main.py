@@ -77,6 +77,11 @@ def main(args):
         name=experiment_name,
         use_amp=args.use_amp
     )
+    '''evaluator = QuadrupletLossEvaluator(
+        quadruplet_dataset=val_set,
+        quadruplet_loss=quadruplet_loss,
+        batch_size=args.batch_size
+    )'''
 
     # Create output folders if they don't exist
     complete_experiment_path = os.path.join(args.experiment_path, experiment_name)
@@ -120,7 +125,7 @@ def main(args):
             checkpoint_save_total_limit=args.checkpoint_save_total_limit
         )
     except EarlyStoppingException as e:
-        print(f"Training ended before due to early stopping. {e}")
+        print(f"Training ended earlier due to early stopping. {e}")
 
 
 if __name__ == '__main__':
@@ -158,7 +163,7 @@ if __name__ == '__main__':
                         help='the value for the accuracy_at_k metric, a python list of int')
     parser.add_argument('--precision_recall_at_k', type=int, nargs='+', default=[1, 3, 5, 10],
                         help='the value for the precision_recall_at_k metric, a python list of int')
-    parser.add_argument('--map_at_k', type=int, nargs='+', default=0,
+    parser.add_argument('--map_at_k', type=int, nargs='+', default=[1, 3, 5, 10],
                         help='the value for the map_at_k metric, a python list of int')
     parser.add_argument('--show_progress_bar', type=bool, default=True,
                         help='whether to show a progress bar')
@@ -198,11 +203,11 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_steps', type=int, default=10000, help='the number of warmup steps')
     parser.add_argument('--learning_rate', type=float, default=2e-5, help='the learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.01, help='the weight decay rate')
-    parser.add_argument('--evaluation_steps', type=int, default=1000,
+    parser.add_argument('--evaluation_steps', type=int, default=500,
                         help='if > 0, an evaluation step is performed after that much training steps')
     parser.add_argument('--save_best_model', type=bool, default=True, help='whether to save the best model')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, help='the maximum gradient norm')
-    parser.add_argument('--checkpoint_save_steps', type=int, default=1000,
+    parser.add_argument('--checkpoint_save_steps', type=int, default=500,
                         help='every how many steps save a checkpoint')
     parser.add_argument('--checkpoint_save_total_limit', type=int, default=0,
                         help='the max number of checkpoint to save')
