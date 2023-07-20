@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import random
-from typing import Optional, List, Callable, Dict, Union, Set, final
+from typing import Optional, List, Callable, Dict, Union, Set, final, Final
 import torch
 from sentence_transformers import SentenceTransformer, InputExample
 from sentence_transformers.evaluation import SentenceEvaluator, SimilarityFunction, TripletEvaluator, \
@@ -21,7 +21,8 @@ from models.losses.losses import QuadrupletLoss
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel
 
 
-IR_EVALUATION_PATH = os.path.join("data", "ir_evaluation", "ir_evaluation_dataset.json")
+IR_EVALUATION_PATH: Final[str] = os.path.join("data", "ir_evaluation", "ir_evaluation_dataset.json")
+N_IR_SAMPLES: Final[int] = 1000  # as in ladder loss
 LOGGER = logging.getLogger(__name__)
 
 
@@ -350,8 +351,7 @@ class QuadrupletEvaluator(SentenceEvaluator):
         part_neg_accuracy = self._part_neg_triplet(model, output_path, epoch, steps)
 
         # Compute global accuracy, following the quadruplet loss formula
-        glob_accuracy = (((
-                                      1 - self._gamma) * pos_part_accuracy + self._gamma * part_neg_accuracy) + pos_neg_accuracy) / 2
+        glob_accuracy = (((1 - self._gamma) * pos_part_accuracy + self._gamma * part_neg_accuracy) + pos_neg_accuracy)/2
 
         LOGGER.info("Pos-Part Accuracy Distance:   \t{:.2f}".format(pos_part_accuracy * 100))
         LOGGER.info("Pos-Neg Accuracy Distance:   \t{:.2f}".format(pos_neg_accuracy * 100))

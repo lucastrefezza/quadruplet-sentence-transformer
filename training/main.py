@@ -7,7 +7,7 @@ from torch.utils.data import random_split, DataLoader, Subset
 from dataset.constants import CLEANED_COCO_TRAIN, OUTPUT_PATH
 from dataset.quadruplet_dataset import QuadrupletDataset, RANDOM, HARD_CONTRASTIVE_TRAIN, CACHE_SIZE_DEFAULT
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel, to_input_example
-from models.evaluators import get_sequential_evaluator
+from models.evaluators import get_sequential_evaluator, N_IR_SAMPLES
 from models.losses import GammaQuadrupletLoss
 from models.losses.losses import DEFAULT_GAMMA
 from training.callbacks import EarlyStoppingCallback, EarlyStoppingException
@@ -39,7 +39,7 @@ def main(args):
 
     train_set, val_set = random_split(dataset=qds, lengths=[1 - args.validation_split, args.validation_split])
     dl_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0)
-    no_transform_val_set = Subset(nt_qds, val_set.indices)
+    no_transform_val_set = Subset(nt_qds, val_set.indices[0:N_IR_SAMPLES])
 
     # Create the loss
     quadruplet_loss = GammaQuadrupletLoss(

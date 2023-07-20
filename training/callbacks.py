@@ -17,10 +17,10 @@ class Callback(ABC):
 
     @epoch.setter
     def epoch(self, epoch: int):
-        if self.__epoch > epoch >= 0:
-            raise ValueError(
-                f"The new epoch # must be greater or equal than the previous one ({self.__epoch}), {epoch} given."
-            )
+        #if self.__epoch > epoch >= 0:
+        #    raise ValueError(
+        #        f"The new epoch # must be greater or equal than the previous one ({self.__epoch}), {epoch} given."
+        #    )
         self.__epoch = epoch
 
     @property
@@ -29,10 +29,10 @@ class Callback(ABC):
 
     @steps.setter
     def steps(self, steps: int):
-        if self.__steps > steps >= -1:
-            raise ValueError(
-                f"The new # of steps must be greater or equal than the previous one ({self.__steps}), {steps} given."
-            )
+        # if self.__steps > steps >= -1:
+        #    raise ValueError(
+        #        f"The new # of steps must be greater or equal than the previous one ({self.__steps}), {steps} given."
+        #    )
         self.__steps = steps
 
     def update_epoch_steps(self, epoch: int, steps: int):
