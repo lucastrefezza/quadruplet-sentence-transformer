@@ -31,9 +31,9 @@ def main(args):
     nt_qds = QuadrupletDataset(args.dataset_path_train,
                                *[f"chunk_{i}.json" for i in range(0, chunk_n)],
                                hard_contrastive_mode=hard_contrastive_mode,
-                               n_pos=args.n_pos,
-                               n_neg=args.n_neg,
-                               n_part_pos=args.n_part_pos,
+                               n_pos=4,
+                               n_neg=1,
+                               n_part_pos=4,
                                cache_size=args.cache_size,
                                transform=None)
 

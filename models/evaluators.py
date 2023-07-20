@@ -13,13 +13,15 @@ from torch import Tensor
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
-from dataset.constants import REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, NEG_EXAMPLES
+from dataset.constants import REFERENCE_EXAMPLE, POS_EXAMPLES, PART_POS_EXAMPLES, NEG_EXAMPLES, RANDOM_SEED
 from dataset.quadruplet_dataset import QuadrupletDataset
 from dataset.sentence_compr_dataset_creation import generate_variations
 from models.losses import GammaQuadrupletLoss
 from models.losses.losses import QuadrupletLoss
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel
 
+
+IR_EVALUATION_PATH = os.path.join("data", "ir_evaluation", "ir_evaluation_dataset.json")
 LOGGER = logging.getLogger(__name__)
 
 
@@ -106,7 +108,7 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
                 full_log_dict[k].append(log_dict[k])
 
             with open(full_out_path, "w") as fp:
-                json.dump(full_log_dict, fp)
+                json.dump(full_log_dict, fp, indent=2)
 
         return average_loss
 
@@ -127,7 +129,7 @@ class QuadrupletEvaluator(SentenceEvaluator):
             positives: List[str],
             partially_positives: List[str],
             negatives: List[str],
-            gamma: float = 0.8,
+            gamma: float = 0.6,
             main_distance_function: SimilarityFunction = None,
             name: str = "",
             batch_size: int = 16,
@@ -375,8 +377,18 @@ class QuadrupletEvaluator(SentenceEvaluator):
 
 
 def create_ir_evaluation_set(dataset: QuadrupletDataset,
-                             n_queries: int = 30) -> Dict[str, Dict[str, Union[str, List[str], Set[str]]]]:
-    # TODO: maybe do data augmentation on query
+                             n_queries: int = 20) -> Dict[str, Dict[str, Union[str, List[str], Set[str]]]]:
+    # If another ir_evaluation_set with the same split exists, then load it without recreating it
+    if os.path.exists(IR_EVALUATION_PATH):
+        with open(IR_EVALUATION_PATH, "r") as fp:
+            ir_evaluation_set = json.load(fp)
+            if ir_evaluation_set["random_seed"] == RANDOM_SEED:
+                # Convert the "relevant" lists to sets as required by InformationRetrievalEvaluator
+                for key in ir_evaluation_set["relevant"]:
+                    ir_evaluation_set["relevant"][key] = set(ir_evaluation_set["relevant"][key])
+                return ir_evaluation_set
+
+    # Select random indices to make the queries
     indexes = set(random.choices(list(range(0, len(dataset))), k=n_queries))
 
     ir_evaluation_set = {
@@ -400,14 +412,14 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
             ir_evaluation_set["queries"][str(query_idx)] = query_example
 
             # Add the positives and partially positives to relevant items
-            ir_evaluation_set["relevant"][str(query_idx)] = set()
+            ir_evaluation_set["relevant"][str(query_idx)] = []
             for example in dataset[idx][POS_EXAMPLES]:
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
-                ir_evaluation_set["relevant"][str(query_idx)].add(str(corpus_idx))
+                ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
                 corpus_idx += 1
             for example in dataset[idx][PART_POS_EXAMPLES]:
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
-                ir_evaluation_set["relevant"][str(query_idx)].add(str(corpus_idx))
+                ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
                 corpus_idx += 1
 
             # Increment the query index
@@ -423,6 +435,14 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
             for example in dataset[idx][PART_POS_EXAMPLES]:
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
                 corpus_idx += 1
+
+    ir_evaluation_set["random_seed"] = RANDOM_SEED
+    with open(IR_EVALUATION_PATH, "w") as fp:
+        json.dump(ir_evaluation_set, fp, indent=2)
+
+    for key in ir_evaluation_set["relevant"]:
+        # Convert the "relevant" lists to sets as required by InformationRetrievalEvaluator
+        ir_evaluation_set["relevant"][key] = set(ir_evaluation_set["relevant"][key])
 
     return ir_evaluation_set
 
@@ -462,8 +482,8 @@ def get_sequential_evaluator(dataset: QuadrupletDataset,
             print(f"Error: {evaluation_queries_path} file could not be opened due to error: {e}")
     if evaluation_queries is None and no_transform_dataset is not None:
         evaluation_queries = create_ir_evaluation_set(no_transform_dataset)
-    elif evaluation_queries_path is None:
-        evaluation_queries = None
+    # elif evaluation_queries_path is None:
+    #    evaluation_queries = None
 
     evaluators = []
     if evaluation_queries is not None:

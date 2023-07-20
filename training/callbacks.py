@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import logging
 import torch
 
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -16,7 +17,7 @@ class Callback(ABC):
 
     @epoch.setter
     def epoch(self, epoch: int):
-        if epoch < self.__epoch:
+        if self.__epoch > epoch >= 0:
             raise ValueError(
                 f"The new epoch # must be greater or equal than the previous one ({self.__epoch}), {epoch} given."
             )
@@ -28,7 +29,7 @@ class Callback(ABC):
 
     @steps.setter
     def steps(self, steps: int):
-        if steps < self.__steps:
+        if self.__steps > steps >= -1:
             raise ValueError(
                 f"The new # of steps must be greater or equal than the previous one ({self.__steps}), {steps} given."
             )
