@@ -17,7 +17,7 @@ class Callback(ABC):
 
     @epoch.setter
     def epoch(self, epoch: int):
-        #if self.__epoch > epoch >= 0:
+        # if self.__epoch > epoch >= 0:
         #    raise ValueError(
         #        f"The new epoch # must be greater or equal than the previous one ({self.__epoch}), {epoch} given."
         #    )
