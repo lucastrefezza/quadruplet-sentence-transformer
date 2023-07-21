@@ -4,8 +4,9 @@ import logging
 import os
 import random
 from typing import Optional, List, Callable, Dict, Union, Set, final, Final
+import numpy as np
 import torch
-from sentence_transformers import SentenceTransformer, InputExample
+from sentence_transformers import SentenceTransformer, InputExample, CrossEncoder
 from sentence_transformers.evaluation import SentenceEvaluator, SimilarityFunction, TripletEvaluator, \
     SequentialEvaluator, InformationRetrievalEvaluator
 from sentence_transformers.util import cos_sim, dot_score, batch_to_device
@@ -20,10 +21,13 @@ from models.losses import GammaQuadrupletLoss
 from models.losses.losses import QuadrupletLoss
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel
 
-
 IR_EVALUATION_PATH: Final[str] = os.path.join("data", "ir_evaluation", "ir_evaluation_dataset.json")
 N_IR_SAMPLES: Final[int] = 1000  # as in ladder loss
+SIMILARITY_THRESHOLD: Final[float] = 0.25  # probably we need to increase these
 LOGGER = logging.getLogger(__name__)
+# cross-encoder/stsb-roberta-large: 91.47% accuracy, cross-encoder/stsb-roberta-base: 90.17% accuracy,
+# cross-encoder/stsb-distilroberta-base: 87.92% accuracy, cross-encoder/stsb-TinyBERT-L-4: 85.50% accuracy
+cross_encoder_singleton = CrossEncoder("cross-encoder/stsb-roberta-large")
 
 
 class QuadrupletLossEvaluator(SentenceEvaluator):
@@ -75,10 +79,12 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
         )
         full_out_path = os.path.join(output_path, "_quadruplet_loss_eval.json")
         with torch.no_grad():
-            for i, instance in tqdm(enumerate(smart_batching_dl), desc="Evaluating quadruplet loss..."):
+            desc = f"Evaluating quadruplet loss. Average loss: {average_loss}"
+            progress_bar = tqdm(range(0, len(smart_batching_dl)), desc=desc)
+            for i, instance in enumerate(smart_batching_dl):
 
+                # Move features to device if required
                 features, labels = instance
-                # features = features.to(model.device)
                 features = list(map(lambda batch: batch_to_device(batch, model.device), features))
                 labels = labels.to(model.device)
 
@@ -89,6 +95,12 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
                     loss_value = loss_model(features, labels)
 
                 average_loss = average_loss + 1 / (i + 1) * (loss_value - average_loss)
+
+                # Update progress bar
+                desc = f"Evaluating quadruplet loss. Average loss: {average_loss}"
+                progress_bar.update(n=1)
+                progress_bar.set_description(desc=desc, refresh=True)
+            progress_bar.close()
 
         if output_path is not None:
             log_dict = {
@@ -377,7 +389,8 @@ class QuadrupletEvaluator(SentenceEvaluator):
 
 
 def create_ir_evaluation_set(dataset: QuadrupletDataset,
-                             n_queries: int = 20) -> Dict[str, Dict[str, Union[str, List[str], Set[str]]]]:
+                             n_queries: int = 20,
+                             cross_encoder_only: bool = True) -> Dict[str, Dict[str, Union[str, List[str], Set[str]]]]:
     # If another ir_evaluation_set with the same split exists, then load it without recreating it
     if os.path.exists(IR_EVALUATION_PATH):
         with open(IR_EVALUATION_PATH, "r") as fp:
@@ -386,6 +399,16 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
                 # Convert the "relevant" lists to sets as required by InformationRetrievalEvaluator
                 for key in ir_evaluation_set["relevant"]:
                     ir_evaluation_set["relevant"][key] = set(ir_evaluation_set["relevant"][key])
+
+                # Log info about the found relevant sentences
+                n_relevant = []
+                for q in ir_evaluation_set["queries"]:
+                    n_relevant.append(len(ir_evaluation_set["relevant"][q]))
+                n_relevant = np.array(n_relevant)
+                print(f"\nNumber of relevant examples for each query: {n_relevant}")
+                print(f"Average number of relevant examples for each query: {np.mean(n_relevant)}")
+                print(f"Quantiles for the number of relevant examples for each query:"
+                      f" {np.quantile(n_relevant, q=[0, 0.25, 0.5, 0.75, 1.0])}")
                 return ir_evaluation_set
 
     # Select random indices to make the queries
@@ -398,7 +421,9 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
     }
     query_idx = 0
     corpus_idx = 0
-    for idx, instance in tqdm(enumerate(dataset), desc="Creating information retrieval evaluation set..."):
+    progress_bar = tqdm(range(0, len(dataset)), desc="Creating information retrieval evaluation set...")
+    # noinspection PyTypeChecker
+    for idx, instance in enumerate(dataset):
 
         # If the current instance has been selected
         if idx in indexes:
@@ -415,11 +440,17 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
             ir_evaluation_set["relevant"][str(query_idx)] = []
             for example in dataset[idx][POS_EXAMPLES]:
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
-                ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
+
+                # Add to the relevant set if required explicitly
+                if not cross_encoder_only:
+                    ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
                 corpus_idx += 1
             for example in dataset[idx][PART_POS_EXAMPLES]:
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
-                ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
+
+                # Add to the relevant set if required explicitly
+                if not cross_encoder_only:
+                    ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
                 corpus_idx += 1
 
             # Increment the query index
@@ -435,6 +466,33 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
             for example in dataset[idx][PART_POS_EXAMPLES]:
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
                 corpus_idx += 1
+
+        # Update the progress bar
+        progress_bar.update(n=1)
+        desc = f"Creating information retrieval evaluation set. Processed queries: {query_idx}/{n_queries}, " \
+               f"Corpus index: {corpus_idx}"
+        progress_bar.set_description(desc=desc, refresh=True)
+    progress_bar.close()
+
+    # TODO: test this
+    for q in tqdm(ir_evaluation_set["queries"], desc="Generating relevant examples using cross-encoder"):
+        couples = [
+            [ir_evaluation_set["queries"][q], ir_evaluation_set["corpus"][c]] for c in ir_evaluation_set["corpus"]
+        ]
+        scores = cross_encoder_singleton.predict(couples)
+        for i, s in enumerate(scores):
+            if s >= SIMILARITY_THRESHOLD:
+                ir_evaluation_set["relevant"][str(q)].append(str(i))
+
+    # Log info about the found relevant sentences
+    n_relevant = []
+    for q in ir_evaluation_set["queries"]:
+        n_relevant.append(len(ir_evaluation_set["relevant"][q]))
+    n_relevant = np.array(n_relevant)
+    print(f"\nNumber of relevant examples for each query: {n_relevant}")
+    print(f"Average number of relevant examples for each query: {np.mean(n_relevant)}")
+    print(f"Quantiles for the number of relevant examples for each query:"
+          f" {np.quantile(n_relevant, q=[0, 0.25, 0.5, 0.75, 1.0])}")
 
     ir_evaluation_set["random_seed"] = RANDOM_SEED
     with open(IR_EVALUATION_PATH, "w") as fp:
