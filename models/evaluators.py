@@ -99,7 +99,7 @@ class QuadrupletLossEvaluator(SentenceEvaluator):
                 # Update progress bar
                 desc = f"Evaluating quadruplet loss. Average loss: {average_loss}"
                 progress_bar.update(n=1)
-                progress_bar.set_description(desc=desc, refresh=True)
+                progress_bar.set_description(desc=desc)
             progress_bar.close()
 
         if output_path is not None:
@@ -471,7 +471,7 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
         progress_bar.update(n=1)
         desc = f"Creating information retrieval evaluation set. Processed queries: {query_idx}/{n_queries}, " \
                f"Corpus index: {corpus_idx}"
-        progress_bar.set_description(desc=desc, refresh=True)
+        progress_bar.set_description(desc=desc)
     progress_bar.close()
 
     # TODO: test this
