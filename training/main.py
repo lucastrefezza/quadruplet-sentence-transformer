@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import torch
 from sentence_transformers import SentenceTransformer
@@ -15,6 +16,7 @@ from training.callbacks import EarlyStoppingCallback, EarlyStoppingException
 
 # noinspection PyTypeChecker
 def main(args):
+
     # Load the dataset
     chunk_n = torch.load(os.path.join(args.dataset_path_train, "chunk_n.pt"))
     hard_contrastive_mode = RANDOM if not args.use_hard_contrastive_sampling else HARD_CONTRASTIVE_TRAIN
@@ -88,6 +90,12 @@ def main(args):
     checkpoints_path = os.path.join(complete_experiment_path, "checkpoints")
     os.makedirs(complete_experiment_path, exist_ok=True)
     os.makedirs(checkpoints_path, exist_ok=True)
+
+    # Store the argparse parameters to the experiment path
+    with open(os.path.join(complete_experiment_path, "command_line_args.json"), "w") as fp:
+        args_dict = args.__dict__
+        args_dict["manual_notes"] = "Insert any comments about the experiment here."
+        json.dump(args_dict, fp, indent=2)
 
     # Create the model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
