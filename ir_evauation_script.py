@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import hashlib
 from typing import Optional, Dict, Union, Set, List
 import torch
 from sentence_transformers import SentenceTransformer
@@ -15,7 +16,8 @@ from models.evaluators import N_IR_SAMPLES, euclidean_score, create_ir_evaluatio
 
 # noinspection PyTypeChecker
 def main(args):
-    print(f"Launching IR evaluation with params: {json.dumps(args.__dict__, indent=2)}...")
+    config_str = json.dumps(args.__dict__, indent=2)
+    print(f"Launching IR evaluation with params: {config_str}...")
 
     # Load the dataset
     chunk_n = torch.load(os.path.join(args.dataset_path_train, "chunk_n.pt"))
@@ -43,7 +45,8 @@ def main(args):
     no_transform_val_set = Subset(nt_qds, val_set.indices[0:N_IR_SAMPLES])
 
     # Create output folders if they don't exist
-    out_path = os.path.join(args.out_path, args.model_path)
+    config_hash = hashlib.sha256(config_str.encode('utf-8')).hexdigest()
+    out_path = os.path.join(args.out_path, config_hash, args.model_path)
     os.makedirs(out_path, exist_ok=True)
 
     # Create the evaluators
