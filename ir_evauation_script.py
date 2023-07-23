@@ -1,21 +1,21 @@
 import argparse
 import json
 import os
+from typing import Optional, Dict, Union, Set, List
 import torch
 from sentence_transformers import SentenceTransformer
+from sentence_transformers.evaluation import InformationRetrievalEvaluator
 from sentence_transformers.util import cos_sim, dot_score
-from torch.utils.data import random_split, DataLoader, Subset
-from dataset.constants import CLEANED_COCO_TRAIN, OUTPUT_PATH
+from torch.utils.data import random_split, Subset
+from dataset.constants import CLEANED_COCO_TRAIN
 from dataset.quadruplet_dataset import QuadrupletDataset, RANDOM, HARD_CONTRASTIVE_TRAIN, CACHE_SIZE_DEFAULT
-from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel, to_input_example
-from models.evaluators import get_sequential_evaluator, N_IR_SAMPLES, euclidean_score
-from models.losses import GammaQuadrupletLoss
-from models.losses.losses import DEFAULT_GAMMA
-from training.callbacks import EarlyStoppingCallback, EarlyStoppingException
+from models.quadruplet_sentence_transformer import to_input_example
+from models.evaluators import N_IR_SAMPLES, euclidean_score, create_ir_evaluation_set
 
 
 # noinspection PyTypeChecker
 def main(args):
+    print(f"Launching IR evaluation with params: {json.dumps(args.__dict__, indent=2)}...")
 
     # Load the dataset
     chunk_n = torch.load(os.path.join(args.dataset_path_train, "chunk_n.pt"))
@@ -40,20 +40,13 @@ def main(args):
                                transform=None)
 
     train_set, val_set = random_split(dataset=qds, lengths=[1 - args.validation_split, args.validation_split])
-    dl_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0)
     no_transform_val_set = Subset(nt_qds, val_set.indices[0:N_IR_SAMPLES])
 
-    # Create the loss
-    quadruplet_loss = GammaQuadrupletLoss(
-        gamma=args.gamma,
-        margin_pos_neg=args.margin_pos_neg,
-        margin_pos_part=args.margin_pos_part,
-        margin_part_neg=args.margin_part_neg,
-        p=args.p
-    )
+    # Create output folders if they don't exist
+    out_path = os.path.join(args.out_path, args.model_path)
+    os.makedirs(out_path, exist_ok=True)
 
     # Create the evaluators
-    experiment_name = args.experiment_name
     score_functions = {'cos_sim': cos_sim, 'dot_score': dot_score, "euclid_score": euclidean_score}
     if args.score_functions == "cos_sim":
         del score_functions['dot_score']
@@ -71,11 +64,30 @@ def main(args):
     elif args.score_functions == 'cos_and_dot':
         del score_functions['euclid']
 
-    evaluator = get_sequential_evaluator(
-        dataset=val_set,
-        no_transform_dataset=no_transform_val_set,
-        loss=quadruplet_loss,
-        evaluation_queries_path=args.evaluation_queries_path,
+    evaluation_queries = None
+    if args.evaluation_queries_path is not None:
+        try:
+            with open(args.evaluation_queries_path, "r") as fp:
+                evaluation_queries: Optional[Dict[str, Dict[str, Union[str, List[str], Set[str]]]]] = json.load(fp)
+
+                # Convert the relevant queries to sets as required by the evaluator
+                for q in evaluation_queries["relevant"]:
+                    evaluation_queries["relevant"][q] = set(evaluation_queries["relevant"])
+        except IOError as e:
+            evaluation_queries = None
+            print(f"Error: {args.evaluation_queries_path} file could not be opened due to error: {e}")
+    if evaluation_queries is None and no_transform_val_set is not None:
+        evaluation_queries = create_ir_evaluation_set(dataset=no_transform_val_set,
+                                                      out_path=os.path.join(out_path, "created_eval_queries.json"),
+                                                      use_pos=not args.dont_use_pos_rel,
+                                                      use_part_pos=not args.dont_use_part_pos_rel,
+                                                      use_cross_encoder=args.use_cross_encoder,
+                                                      add_part_pos_corpus=not args.dont_use_part_pos)
+
+    evaluator = InformationRetrievalEvaluator(
+        queries=evaluation_queries["queries"],
+        corpus=evaluation_queries["corpus"],
+        relevant_docs=evaluation_queries["relevant"],
         corpus_chunk_size=args.corpus_chunk_size,
         mrr_at_k=args.mrr_at_k,
         ndcg_at_k=args.ndcg_at_k,
@@ -87,65 +99,18 @@ def main(args):
         write_csv=args.write_csv,
         score_functions=score_functions,
         main_score_function=None,
-        main_distance_function=None,
-        name=experiment_name,
-        use_amp=args.use_amp
+        name=f"{args.model_path.replace('/', '_')}"
     )
-    '''evaluator = QuadrupletLossEvaluator(
-        quadruplet_dataset=val_set,
-        quadruplet_loss=quadruplet_loss,
-        batch_size=args.batch_size
-    )'''
-
-    # Create output folders if they don't exist
-    complete_experiment_path = os.path.join(args.experiment_path, experiment_name)
-    checkpoints_path = os.path.join(complete_experiment_path, "checkpoints")
-    os.makedirs(complete_experiment_path, exist_ok=True)
-    os.makedirs(checkpoints_path, exist_ok=True)
-
-    # Store the argparse parameters to the experiment path
-    with open(os.path.join(complete_experiment_path, "command_line_args.json"), "w") as fp:
-        args_dict = args.__dict__
-        args_dict["manual_notes"] = "Insert any comments about the experiment here."
-        json.dump(args_dict, fp, indent=2)
 
     # Create the model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SentenceTransformer(model_name_or_path=args.model_name, device=device)
-    quadruplet_loss_model = QuadrupletSentenceTransformerLossModel(
-        st_model=model,
-        quadruplet_loss=quadruplet_loss
-    )
+    baseline = SentenceTransformer(args.baseline_model, device=device)
+    model = SentenceTransformer(args.model_path, device=device)
 
-    # Train the model
-    train_objectives = [(dl_train, quadruplet_loss_model)]
-    early_stopping = EarlyStoppingCallback(patience=args.early_stopping_patience,
-                                           delta=args.early_stopping_delta,
-                                           minimization=True)
-    try:
-        model.fit(
-            train_objectives=train_objectives,
-            evaluator=evaluator,
-            epochs=args.epochs,
-            steps_per_epoch=None,
-            scheduler=args.scheduler,
-            warmup_steps=args.warmup_steps,
-            optimizer_class=torch.optim.AdamW,
-            optimizer_params={'lr': args.learning_rate},
-            weight_decay=args.weight_decay,
-            evaluation_steps=args.evaluation_steps,
-            output_path=complete_experiment_path,
-            save_best_model=args.save_best_model,
-            max_grad_norm=args.max_grad_norm,
-            use_amp=args.use_amp,
-            callback=early_stopping,
-            show_progress_bar=args.show_progress_bar,
-            checkpoint_path=checkpoints_path,
-            checkpoint_save_steps=args.checkpoint_save_steps,
-            checkpoint_save_total_limit=args.checkpoint_save_total_limit
-        )
-    except EarlyStoppingException as e:
-        print(f"Training ended earlier due to early stopping. {e}")
+    evaluator(model=baseline, output_path=out_path)
+    evaluator(model=model, output_path=out_path)
+
+    print("IR evaluation completed.")
 
 
 if __name__ == '__main__':
@@ -167,10 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--cache_size', type=int, default=CACHE_SIZE_DEFAULT, help='the dataset cache size (in chunks)')
 
     # Evaluation params
-    loss_choices = ["gamma", "discriminator"]
-    parser.add_argument('--loss', type=str, default="gamma",
-                        choices=loss_choices,
-                        help=f'the loss to use, one of the following: {loss_choices}')
+    parser.add_argument("--out_path", type=str, default='_out_ir_eval/eval1')
     parser.add_argument('--evaluation_queries_path', type=str, default="to be defined",
                         help='the path of the file containing the evaluation queries')
     parser.add_argument('--corpus_chunk_size', type=int, default=50000,
@@ -198,46 +160,23 @@ if __name__ == '__main__':
                         help=f"the score functions to use, one of ${score_choices}")
     parser.add_argument('--main_score_function', type=str, default=None,
                         help='the main score function')
-    parser.add_argument('--use_amp', type=bool, default=False, help="whether to use mixed-precision evaluation")
-
-    # Experiment params
-    parser.add_argument('--experiment_path', type=str, default=OUTPUT_PATH,
-                        help="the path to save the experiment files in")
-    parser.add_argument('--experiment_name', type=str, default='', help='the experiment name')
-
-    # Loss params
-    parser.add_argument('--gamma', type=float, default=DEFAULT_GAMMA, help='gamma parameter in gamma quadruplet loss')
-    parser.add_argument('--margin_pos_neg', type=float, default=1.0,
-                        help='margin between positive and negative examples')
-    parser.add_argument('--margin_pos_part', type=float, default=0.5,
-                        help='margin between positive and partially positive examples')
-    parser.add_argument('--margin_part_neg', type=float, default=0.5,
-                        help='margin between partially positive and negative examples')
-    parser.add_argument('--p', type=float, default=2.0, help='p-norm type to use in the loss')
-
-    # Training params
     parser.add_argument('--batch_size', type=int, default=32, help='the batch size for train and validation')
-    parser.add_argument('--epochs', type=int, default=10, help='the number of training epochs')
-    schedulers = ['constantlr', 'warmupconstant', 'warmuplinear', 'warmupcosine', 'warmupcosinewithhardrestarts']
-    parser.add_argument('--scheduler', type=str, default='warmuplinear', choices=schedulers,
-                        help=f'learning rate scheduler, one of {schedulers}')
-    parser.add_argument('--warmup_steps', type=int, default=10000, help='the number of warmup steps')
-    parser.add_argument('--learning_rate', type=float, default=2e-5, help='the learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0.01, help='the weight decay rate')
-    parser.add_argument('--evaluation_steps', type=int, default=500,
-                        help='if > 0, an evaluation step is performed after that much training steps')
-    parser.add_argument('--save_best_model', type=bool, default=True, help='whether to save the best model')
-    parser.add_argument('--max_grad_norm', type=float, default=1.0, help='the maximum gradient norm')
-    parser.add_argument('--checkpoint_save_steps', type=int, default=500,
-                        help='every how many steps save a checkpoint')
-    parser.add_argument('--checkpoint_save_total_limit', type=int, default=0,
-                        help='the max number of checkpoint to save')
-    parser.add_argument('--early_stopping_patience', type=int, default=5, help='early stopping patience (in epochs)')
-    parser.add_argument('--early_stopping_delta', type=float, default=0.0,
-                        help='the minimum improvement considered by early stopping')
+
+    # Eval set params
+    parser.add_argument('--use_cross_encoder', action="store_true",
+                        help="whether to use the cross encoder to create the eval set")
+    parser.add_argument('--dont_use_part_pos', action="store_true",
+                        help="do not use partially positive examples in corpus")
+    parser.add_argument('--dont_use_part_pos_rel', action="store_true",
+                        help="do not use partially positive examples as relevant")
+    parser.add_argument('--dont_use_pos_rel', action="store_true",
+                        help="do not use positive examples as relevant")
 
     # Model params
-    parser.add_argument('--model_name', type=str, default='all-MiniLM-L6-v2', help="the SentenceTransformer model type")
+    parser.add_argument('--baseline_model', type=str, default='all-MiniLM-L6-v2',
+                        help="the SentenceTransformer model type")
+    parser.add_argument('--model_path', type=str, default='trained/exp5',
+                        help="the quadruplet sentence transformer")
 
     arguments = parser.parse_args()
     main(arguments)

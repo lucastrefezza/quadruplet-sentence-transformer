@@ -21,9 +21,10 @@ from models.losses import GammaQuadrupletLoss
 from models.losses.losses import QuadrupletLoss
 from models.quadruplet_sentence_transformer import QuadrupletSentenceTransformerLossModel
 
+
 IR_EVALUATION_PATH: Final[str] = os.path.join("data", "ir_evaluation", "ir_evaluation_dataset.json")
 N_IR_SAMPLES: Final[int] = 1000  # as in ladder loss
-SIMILARITY_THRESHOLD: Final[float] = 0.25  # probably we need to increase these
+SIMILARITY_THRESHOLD: Final[float] = 0.4  # probably we need to increase this
 LOGGER = logging.getLogger(__name__)
 # cross-encoder/stsb-roberta-large: 91.47% accuracy, cross-encoder/stsb-roberta-base: 90.17% accuracy,
 # cross-encoder/stsb-distilroberta-base: 87.92% accuracy, cross-encoder/stsb-TinyBERT-L-4: 85.50% accuracy
@@ -388,12 +389,32 @@ class QuadrupletEvaluator(SentenceEvaluator):
         return glob_accuracy
 
 
+def euclidean_score(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    if not isinstance(a, torch.Tensor):
+        a = torch.tensor(a)
+
+    if not isinstance(b, torch.Tensor):
+        b = torch.tensor(b)
+
+    if len(a.shape) == 1:
+        a = a.unsqueeze(0)
+
+    if len(b.shape) == 1:
+        b = b.unsqueeze(0)
+
+    return 1 / (1 + torch.cdist(a, b, p=2))
+
+
 def create_ir_evaluation_set(dataset: QuadrupletDataset,
                              n_queries: int = 20,
-                             cross_encoder_only: bool = True) -> Dict[str, Dict[str, Union[str, List[str], Set[str]]]]:
+                             out_path: str = IR_EVALUATION_PATH,
+                             use_pos: bool = False,
+                             use_part_pos: bool = False,
+                             use_cross_encoder: bool = True,
+                             add_part_pos_corpus: bool = True) -> Dict[str, Dict[str, Union[str, List[str], Set[str]]]]:
     # If another ir_evaluation_set with the same split exists, then load it without recreating it
-    if os.path.exists(IR_EVALUATION_PATH):
-        with open(IR_EVALUATION_PATH, "r") as fp:
+    if os.path.exists(out_path):
+        with open(out_path, "r") as fp:
             ir_evaluation_set = json.load(fp)
             if ir_evaluation_set["random_seed"] == RANDOM_SEED:
                 # Convert the "relevant" lists to sets as required by InformationRetrievalEvaluator
@@ -442,14 +463,15 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
 
                 # Add to the relevant set if required explicitly
-                if not cross_encoder_only:
+                if use_pos:
                     ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
                 corpus_idx += 1
             for example in dataset[idx][PART_POS_EXAMPLES]:
-                ir_evaluation_set["corpus"][str(corpus_idx)] = example
+                if add_part_pos_corpus:
+                    ir_evaluation_set["corpus"][str(corpus_idx)] = example
 
                 # Add to the relevant set if required explicitly
-                if not cross_encoder_only:
+                if add_part_pos_corpus and use_part_pos:
                     ir_evaluation_set["relevant"][str(query_idx)].append(str(corpus_idx))
                 corpus_idx += 1
 
@@ -463,9 +485,11 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
             for example in dataset[idx][POS_EXAMPLES]:
                 ir_evaluation_set["corpus"][str(corpus_idx)] = example
                 corpus_idx += 1
-            for example in dataset[idx][PART_POS_EXAMPLES]:
-                ir_evaluation_set["corpus"][str(corpus_idx)] = example
-                corpus_idx += 1
+
+            if add_part_pos_corpus:
+                for example in dataset[idx][PART_POS_EXAMPLES]:
+                    ir_evaluation_set["corpus"][str(corpus_idx)] = example
+                    corpus_idx += 1
 
         # Update the progress bar
         progress_bar.update(n=1)
@@ -474,15 +498,15 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
         progress_bar.set_description(desc=desc)
     progress_bar.close()
 
-    # TODO: test this
-    for q in tqdm(ir_evaluation_set["queries"], desc="Generating relevant examples using cross-encoder"):
-        couples = [
-            [ir_evaluation_set["queries"][q], ir_evaluation_set["corpus"][c]] for c in ir_evaluation_set["corpus"]
-        ]
-        scores = cross_encoder_singleton.predict(couples)
-        for i, s in enumerate(scores):
-            if s >= SIMILARITY_THRESHOLD:
-                ir_evaluation_set["relevant"][str(q)].append(str(i))
+    if use_cross_encoder:
+        for q in tqdm(ir_evaluation_set["queries"], desc="Generating relevant examples using cross-encoder"):
+            couples = [
+                [ir_evaluation_set["queries"][q], ir_evaluation_set["corpus"][c]] for c in ir_evaluation_set["corpus"]
+            ]
+            scores = cross_encoder_singleton.predict(couples)
+            for i, s in enumerate(scores):
+                if s >= SIMILARITY_THRESHOLD:
+                    ir_evaluation_set["relevant"][str(q)].append(str(i))
 
     # Log info about the found relevant sentences
     n_relevant = []
@@ -495,7 +519,7 @@ def create_ir_evaluation_set(dataset: QuadrupletDataset,
           f" {np.quantile(n_relevant, q=[0, 0.25, 0.5, 0.75, 1.0])}")
 
     ir_evaluation_set["random_seed"] = RANDOM_SEED
-    with open(IR_EVALUATION_PATH, "w") as fp:
+    with open(out_path, "w") as fp:
         json.dump(ir_evaluation_set, fp, indent=2)
 
     for key in ir_evaluation_set["relevant"]:
