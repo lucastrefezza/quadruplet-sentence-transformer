@@ -135,7 +135,7 @@ if __name__ == '__main__':
     parser.add_argument('--cache_size', type=int, default=CACHE_SIZE_DEFAULT, help='the dataset cache size (in chunks)')
 
     # Evaluation params
-    parser.add_argument("--out_path", type=str, default='_out_ir_eval/eval1')
+    parser.add_argument("--out_path", type=str, default='_out_ir_eval/eval2')
     parser.add_argument('--evaluation_queries_path', type=str, default="to be defined",
                         help='the path of the file containing the evaluation queries')
     parser.add_argument('--corpus_chunk_size', type=int, default=50000,
