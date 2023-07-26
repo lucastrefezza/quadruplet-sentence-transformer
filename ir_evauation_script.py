@@ -2,13 +2,14 @@ import argparse
 import json
 import os
 import hashlib
+import random
 from typing import Optional, Dict, Union, Set, List
 import torch
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.evaluation import InformationRetrievalEvaluator
 from sentence_transformers.util import cos_sim, dot_score
 from torch.utils.data import random_split, Subset
-from dataset.constants import CLEANED_COCO_TRAIN
+from dataset.constants import CLEANED_COCO_TRAIN, CLEANED_COCO_TEST
 from dataset.quadruplet_dataset import QuadrupletDataset, RANDOM, HARD_CONTRASTIVE_TRAIN, CACHE_SIZE_DEFAULT
 from models.quadruplet_sentence_transformer import to_input_example
 from models.evaluators import N_IR_SAMPLES, euclidean_score, create_ir_evaluation_set
@@ -44,10 +45,26 @@ def main(args):
     train_set, val_set = random_split(dataset=qds, lengths=[1 - args.validation_split, args.validation_split])
     no_transform_val_set = Subset(nt_qds, val_set.indices[0:N_IR_SAMPLES])
 
+    if args.use_test_set:
+        chunk_n = torch.load(os.path.join(args.dataset_path_test, "chunk_n.pt"))
+        nt_qds = QuadrupletDataset(args.dataset_path_test,
+                                   *[f"chunk_{i}.json" for i in range(0, chunk_n)],
+                                   hard_contrastive_mode=hard_contrastive_mode,
+                                   n_pos=4,
+                                   n_neg=1,
+                                   n_part_pos=4,
+                                   cache_size=args.cache_size,
+                                   transform=None)
+        no_transform_val_set = Subset(nt_qds, random.sample(population=range(0, len(nt_qds)), k=N_IR_SAMPLES))
+
     # Create output folders if they don't exist
     config_hash = hashlib.sha256(config_str.encode('utf-8')).hexdigest()
     out_path = os.path.join(args.out_path, config_hash, args.model_path)
     os.makedirs(out_path, exist_ok=True)
+
+    # Store terminal parameters
+    with open(os.path.join(out_path, "command_line_args.json"), "w") as fp:
+        json.dump(args.__dict__, fp, indent=2)
 
     # Create the evaluators
     score_functions = {'cos_sim': cos_sim, 'dot_score': dot_score, "euclid_score": euclidean_score}
@@ -133,6 +150,9 @@ if __name__ == '__main__':
     parser.add_argument('--n_neg', type=int, default=1,
                         help='number of negative examples to select for each training instance')
     parser.add_argument('--cache_size', type=int, default=CACHE_SIZE_DEFAULT, help='the dataset cache size (in chunks)')
+    parser.add_argument('--use_test_set', action="store_true", help="whether to use the test set to evaluate")
+    parser.add_argument('--dataset_path_test', type=str, default=os.path.join(CLEANED_COCO_TEST, "coco_ds_test"),
+                        help="test dataset path")
 
     # Evaluation params
     parser.add_argument("--out_path", type=str, default='_out_ir_eval/eval2')

@@ -122,6 +122,8 @@ def main(args):
     early_stopping = EarlyStoppingCallback(patience=args.early_stopping_patience,
                                            delta=args.early_stopping_delta,
                                            minimization=True)
+
+    evaluator(model, output_path=complete_experiment_path, epoch=-1, steps=-1)
     try:
         model.fit(
             train_objectives=train_objectives,
